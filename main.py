@@ -104,3 +104,87 @@ def get_all_tasks(request: Request, status: Optional[str] = None):
     """Chức năng 1: Xem danh sách công việc hiện có (Hỗ trợ lọc & mảng rỗng)"""
     filtered_tasks = tasks_db
     if status:
+        filtered_tasks = [task for task in tasks_db if task["status"] == status]
+
+    return make_unified_response(
+        status_code=status.HTTP_200_OK,
+        message="Lấy danh sách công việc thành công!",
+        data=filtered_tasks,
+        path=request.url.path
+    )
+
+@app.post("/tasks")
+def create_task(request: Request, task_in: TaskCreateSchema):
+    """Chức năng 2: Tạo mới công việc nhóm (Chặn trùng title tự động)"""
+    for task in tasks_db:
+        if task["title"].strip().lower() == task_in.title.strip().lower():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="ERR-TASK-01: Task conflict: Title field duplicates an existing record.::Lỗi: Tiêu đề công việc này đã tồn tại trong nhóm!"
+            )
+
+    max_id = max([task["id"] for task in tasks_db]) if tasks_db else 0
+    new_task = {
+        "id": max_id + 1,
+        "title": task_in.title,
+        "description": task_in.description,
+        "assignee": task_in.assignee,
+        "priority": task_in.priority,
+        "status": "todo",
+        "created_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    }
+    tasks_db.append(new_task)
+
+    return make_unified_response(
+        status_code=status.HTTP_201_CREATED,
+        message="Khởi tạo công việc mới thành công!",
+        data=new_task,
+        path=request.url.path
+    )
+
+@app.put("/tasks/{task_id}")
+def update_task_status(request: Request, task_id: int, status_in: TaskStatusUpdateSchema):
+    """Chức năng 3: Cập nhật trạng thái tiến độ công việc"""
+    target_task = None
+    for task in tasks_db:
+        if task["id"] == task_id:
+            target_task = task
+            break
+
+    if not target_task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="ERR-TASK-03: Task not found.::Lỗi: Không tìm thấy ID công việc yêu cầu!"
+        )
+
+    if target_task["status"] == "done":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ERR-TASK-04: Cannot regress status of a completed task.::Lỗi: Công việc đã hoàn thành không được phép cập nhật lùi trạng thái!"
+        )
+
+    target_task["status"] = status_in.status
+    return make_unified_response(
+        status_code=status.HTTP_200_OK,
+        message="Cập nhật tiến độ công việc thành công!",
+        data=target_task,
+        path=request.url.path
+    )
+
+@app.get("/tasks/analytics/dashboard")
+def get_dashboard_analytics(request: Request):
+    """Chức năng 4: Endpoint điều phối thống kê hiệu suất nhóm"""
+    total_tasks, completed_tasks, completion_rate_percentage = calculate_team_metrics()
+
+    dashboard_data = {
+        "total_tasks": total_tasks,
+        "completed_tasks": completed_tasks,
+        "completion_rate_percentage": completion_rate_percentage
+    }
+
+    return make_unified_response(
+        status_code=status.HTTP_200_OK,
+        message="Lấy số liệu thống kê hiệu suất nhóm thành công!",
+        data=dashboard_data,
+        path=request.url.path
+    )
